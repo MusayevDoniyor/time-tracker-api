@@ -1,4 +1,4 @@
-export function calculateMinutes(fixedTime, actualTime = Date.now) {
+exports.calculateMinutes = (fixedTime, actualTime = Date.now) => {
   console.log(fixedTime, actualTime);
   const [fixedHour, fixedMin] = fixedTime.split(":").map(Number);
   const [actualHour, actualMin] = actualTime.split(":").map(Number);
@@ -8,9 +8,9 @@ export function calculateMinutes(fixedTime, actualTime = Date.now) {
 
   console.log(actualMinutes - fixedMinutes, 0);
   return Math.max(actualMinutes - fixedMinutes, 0); // Faqat kech qolgan vaqtni olamiz
-}
+};
 
-export function getDistance(loc1, loc2) {
+exports.getDistance = (loc1, loc2) => {
   const R = 6371; // Yer radiusi (km)
 
   const lat1 = loc1.lat * (Math.PI / 180);
@@ -28,4 +28,4 @@ export function getDistance(loc1, loc2) {
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c; // Masofa (km)
-}
+};
