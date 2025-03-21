@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "start": "node server.js"
   },
   "author": "Musayev Doniyor",
   "license": "ISC",
@@ -12,7 +13,6 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "mongoose": "^8.12.1",
-    "uuid": "^11.1.0"
+    "mongoose": "^8.12.1"
   }
 }

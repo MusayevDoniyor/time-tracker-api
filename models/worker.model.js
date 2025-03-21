@@ -15,11 +15,20 @@ const workerSchema = new mongoose.Schema(
     checkInTime: {
       type: String,
       default: null,
+      match: [
+        /^([01]\d|2[0-3]):([0-5]\d)$/,
+        "Ish vaqti noto'g'ri formatda! (HH:mm)",
+      ],
     },
     checkOutTime: {
       type: String,
       default: null,
+      match: [
+        /^([01]\d|2[0-3]):([0-5]\d)$/,
+        "Ish vaqti noto'g'ri formatda! (HH:mm)",
+      ],
     },
+
     position: {
       type: String,
       required: true,
@@ -42,10 +51,11 @@ const workerSchema = new mongoose.Schema(
     isLate: { type: Boolean, default: false },
     isPresent: { type: Boolean, default: false },
     isOutside: { type: Boolean, default: false },
+    isGone: { type: Boolean, default: false },
 
     workDays: [
       {
-        date: { type: Date, required: true },
+        date: { type: Date, default: Date.now },
         checkIn: { type: String, default: null },
         checkOut: { type: String, default: null },
         lateMinutes: { type: Number, default: 0, min: 0 },
@@ -58,7 +68,7 @@ const workerSchema = new mongoose.Schema(
       {
         date: { type: Date, required: true, default: Date.now() },
         amount: { type: Number, required: true, min: 1 },
-        // reason: { type: String, required: true },
+        reason: { type: String, default: "" },
       },
     ],
 
