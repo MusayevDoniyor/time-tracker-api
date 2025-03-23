@@ -54,7 +54,7 @@ const getHolidays = async (req, res) => {
 
 const deleteExpired = async (req, res) => {
   try {
-    const deletedCount = await deleteExpiredHolidays();
+    const deletedCount = await deleteExpiredHolidays(Holiday);
 
     return response(res, 200, null, {
       message: `${deletedCount} ta o'tib ketgan bayramlar o'chirildi`,
@@ -66,7 +66,12 @@ const deleteExpired = async (req, res) => {
 
 const createHoliday = async (req, res) => {
   try {
-    const { holidays } = req.body;
+    const {
+      holidays,
+      name = "Bayram",
+      description = "",
+      isNationalHoliday = true,
+    } = req.body;
 
     // Validate input
     if (!holidays || !Array.isArray(holidays) || holidays.length === 0) {
@@ -78,8 +83,17 @@ const createHoliday = async (req, res) => {
     }
 
     // Process dates to ensure they're in the correct format
-    const processedDates = holidays.map((date) => new Date(date));
+    const processedDates = [];
+    for (const dateStr of holidays) {
+      const date = new Date(dateStr);
 
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return response(res, 400, `Noto'g'ri sana formati: ${dateStr}`);
+      }
+
+      processedDates.push(date);
+    }
     // Check for existing holidays
     const existingHolidays = await Holiday.find({
       date: { $in: processedDates },
@@ -98,7 +112,9 @@ const createHoliday = async (req, res) => {
     // Add new holidays
     const newHolidays = processedDates.map((date) => ({
       date,
-      name: req.body.name || "Bayram",
+      name,
+      description,
+      isNationalHoliday,
     }));
 
     const savedHolidays = await Holiday.insertMany(newHolidays);
