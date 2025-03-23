@@ -351,11 +351,22 @@ const checkIn = async (req, res) => {
     if (!worker) return;
 
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split("T")[0]; // "YYYY-MM-DD" formatga o'tkazamiz
 
-    let workDay = worker.workDays.find(
-      (day) => new Date(day.date).setHours(0, 0, 0, 0) === today.getTime()
-    );
+    // 📌 1. Bayram ekanligini tekshiramiz
+    const isHoliday = await Holiday.findOne({ date: todayStr });
+    console.log("Bugun:", todayStr, "| Bayram bormi?:", isHoliday);
+
+    if (isHoliday) {
+      return response(res, 400, "Bugun ishchilar uchun dam olish kuni.");
+    }
+
+    // 📌 2. Ishchi allaqachon check-in qilganmi?
+    let workDay = worker.workDays.find((day) => {
+      return day.date.toISOString().split("T")[0] === todayStr; // ✅ To‘g‘ri taqqoslash
+    });
+
+    console.log("Bugungi ish kuni topildimi?", workDay);
 
     // Validate time format
     const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -370,7 +381,6 @@ const checkIn = async (req, res) => {
 
     // Simple string comparison for times
     if (worker.checkOutTime && checkInTime > worker.checkOutTime) {
-      // Handle midnight crossover
       if (
         worker.checkOutTime < worker.checkInTime &&
         checkInTime > worker.checkInTime

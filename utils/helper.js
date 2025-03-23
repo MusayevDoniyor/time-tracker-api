@@ -29,3 +29,16 @@ exports.getDistance = (loc1, loc2) => {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c; // Masofa (km)
 };
+
+exports.deleteExpiredHolidays = async (Holiday) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  try {
+    const result = await Holiday.deleteMany({ date: { $lt: today } });
+    return result.deletedCount;
+  } catch (error) {
+    console.error("Error deleting expired holidays:", error);
+    return 0;
+  }
+};
