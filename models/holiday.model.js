@@ -4,6 +4,8 @@ const holidaySchema = new mongoose.Schema(
   {
     name: { type: String, default: "", trim: true },
     date: { type: Date, required: true, unique: true },
+    description: { type: String, default: "" },
+    isNationalHoliday: { type: Boolean, default: true },
   },
   { timestamps: true }
 );
