@@ -1,4 +1,7 @@
 const Worker = require("../models/worker.model");
+const WorkDay = require("../models/workDay.model");
+const Fine = require("../models/fine.model");
+const Leave = require("../models/leave.model");
 const Holiday = require("../models/holiday.model");
 const Branch = require("../models/branch.model");
 const { calculateMinutes, getDistance } = require("../utils/helper");
@@ -102,7 +105,7 @@ const getWorkers = async (req, res) => {
   }
 };
 
-// 📌 ID bo‘yicha ishchini olish
+// 📌 ID bo'yicha ishchini olish
 const getWorkerById = async (req, res) => {
   try {
     const worker = await findDocumentById(
@@ -115,8 +118,21 @@ const getWorkerById = async (req, res) => {
 
     await worker.populate("branch");
 
+    // Get related data
+    const workDays = await WorkDay.find({ worker: worker._id }).sort({
+      date: -1,
+    });
+    const fines = await Fine.find({ worker: worker._id }).sort({ date: -1 });
+    const leaves = await Leave.find({ worker: worker._id }).sort({ start: -1 });
+
+    // Add the related data to the response
+    const workerData = worker.toObject();
+    workerData.workDays = workDays;
+    workerData.fines = fines;
+    workerData.leaves = leaves;
+
     return response(res, 200, null, {
-      worker,
+      worker: workerData,
     });
   } catch (error) {
     return response(res, 500, error.message);
@@ -156,6 +172,11 @@ const deleteWorker = async (req, res) => {
     const worker = await Worker.findByIdAndDelete(req.params.id);
     if (!worker) return response(res, 404, "Ishchi topilmadi!");
 
+    // Delete related data
+    await WorkDay.deleteMany({ worker: req.params.id });
+    await Fine.deleteMany({ worker: req.params.id });
+    await Leave.deleteMany({ worker: req.params.id });
+
     return response(res, 200, null, { message: "Ishchi o'chirildi!" });
   } catch (error) {
     return response(res, 500, error.message);
@@ -164,27 +185,52 @@ const deleteWorker = async (req, res) => {
 
 //* 2️⃣ WORKER ACTIONS
 
-// 📌 Ish kunini qo‘shish
+// 📌 Ish kunini qo'shish
 const addWorkDay = async (req, res) => {
   try {
-    const worker = await Worker.findByIdAndUpdate(
+    const worker = await findDocumentById(
+      Worker,
+      res,
       req.params.id,
-      { $push: { workDays: req.body } },
-      { new: true }
+      "Ishchi topilmadi!"
     );
+    if (!worker) return;
 
-    if (!worker) return response(res, 404, "Ishchi topilmadi!");
+    const { date, checkIn, checkOut, lateMinutes, leftEarlyMinutes, absent } =
+      req.body;
+
+    // Check if a workday already exists for this date
+    const existingWorkDay = await WorkDay.findOne({
+      worker: worker._id,
+      date: new Date(date),
+    });
+
+    if (existingWorkDay) {
+      return response(res, 400, "Bu sana uchun ish kuni allaqachon mavjud!");
+    }
+
+    const newWorkDay = new WorkDay({
+      worker: worker._id,
+      date: date || new Date(),
+      checkIn,
+      checkOut,
+      lateMinutes: lateMinutes || 0,
+      leftEarlyMinutes: leftEarlyMinutes || 0,
+      absent: absent || false,
+    });
+
+    await newWorkDay.save();
 
     return response(res, 201, null, {
       message: "Ish kuni muvaffaqqiyatli qo'shildi!",
-      worker,
+      workDay: newWorkDay,
     });
   } catch (error) {
     return response(res, 500, error.message);
   }
 };
 
-// 📌 Ruxsat (ta'til) qo‘shish
+// 📌 Ruxsat (ta'til) qo'shish
 const addLeave = async (req, res) => {
   try {
     if (!Object.keys(req.body).length)
@@ -216,13 +262,12 @@ const addLeave = async (req, res) => {
     const today = new Date();
 
     // ? 📌 Agar bu kunga ta'til belgilangan bo'lsa, xatolik qaytarish
-    const existingLeave = worker.leaves.find((leave) => {
-      return (
-        (startDate >= new Date(leave.start) &&
-          startDate <= new Date(leave.end)) ||
-        (endDate >= new Date(leave.start) && endDate <= new Date(leave.end)) ||
-        (startDate <= new Date(leave.start) && endDate >= new Date(leave.end))
-      );
+    const existingLeave = await Leave.findOne({
+      worker: worker._id,
+      $or: [
+        { start: { $lte: endDate }, end: { $gte: startDate } },
+        { start: { $gte: startDate }, end: { $lte: endDate } },
+      ],
     });
 
     if (existingLeave)
@@ -240,24 +285,20 @@ const addLeave = async (req, res) => {
         "Ushbu sana dam olish kuni sifatida belgilangan!"
       );
 
-    // ? 📌 Eski ta'tillarni avtomatik tozalash
-    worker.leaves = worker.leaves.filter(
-      (leave) => new Date(leave.end) >= today
-    );
-
     // ? 📌 Yangi ta'til qo'shish
-    worker.leaves.push({
+    const newLeave = new Leave({
+      worker: worker._id,
       start,
       end,
-      reason,
+      reason: reason || "",
       type,
     });
 
-    await worker.save();
+    await newLeave.save();
 
     return response(res, 201, null, {
       message: "Ishchi uchun ta'til muvaffaqiyatli qo'shildi!",
-      worker,
+      leave: newLeave,
     });
   } catch (error) {
     console.log(error);
@@ -265,7 +306,7 @@ const addLeave = async (req, res) => {
   }
 };
 
-// 📌 Jarima qo‘shish
+// 📌 Jarima qo'shish
 const addFine = async (req, res) => {
   try {
     const { amount, reason, date } = req.body;
@@ -287,14 +328,22 @@ const addFine = async (req, res) => {
       return response(res, 400, "O'tgan sana uchun jarima qo'shib bo'lmaydi!");
     }
 
-    worker.fines.push({ amount, reason, date: fineDate });
+    const newFine = new Fine({
+      worker: worker._id,
+      amount,
+      reason,
+      date: fineDate,
+    });
 
+    await newFine.save();
+
+    // Update worker's total penalty
     worker.penalty += amount;
     await worker.save();
 
     return response(res, 201, null, {
       message: "Jarima muvaffaqiyatli qo'shildi!",
-      worker,
+      fine: newFine,
     });
   } catch (error) {
     return response(res, 500, error.message);
@@ -312,7 +361,9 @@ const calculateSalary = async (req, res) => {
     );
     if (!worker) return;
 
-    const totalFines = worker.fines.reduce((sum, fine) => sum + fine.amount, 0);
+    // Get all fines for this worker
+    const fines = await Fine.find({ worker: worker._id });
+    const totalFines = fines.reduce((sum, fine) => sum + fine.amount, 0);
     const finalSalary = Math.max(worker.salary - totalFines, 0);
 
     return response(res, 200, null, {
@@ -351,6 +402,7 @@ const checkIn = async (req, res) => {
     if (!worker) return;
 
     const today = new Date();
+    today.setHours(0, 0, 0, 0); // Set to start of day for comparison
     const todayStr = today.toISOString().split("T")[0]; // "YYYY-MM-DD" formatga o'tkazamiz
 
     // 📌 1. Bayram ekanligini tekshiramiz
@@ -362,8 +414,13 @@ const checkIn = async (req, res) => {
     }
 
     // 📌 2. Ishchi allaqachon check-in qilganmi?
-    let workDay = worker.workDays.find((day) => {
-      return day.date.toISOString().split("T")[0] === todayStr; // ✅ To‘g‘ri taqqoslash
+    // Find today's workDay
+    let workDay = await WorkDay.findOne({
+      worker: worker._id,
+      date: {
+        $gte: today,
+        $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+      },
     });
 
     console.log("Bugungi ish kuni topildimi?", workDay);
@@ -392,48 +449,68 @@ const checkIn = async (req, res) => {
     }
 
     if (!workDay) {
-      workDay = {
+      // Create a new workDay
+      workDay = new WorkDay({
+        worker: worker._id,
         date: today,
         checkIn: checkInTime,
         checkOut: null,
-      };
-      worker.workDays.push(workDay);
+        absent: false, // Mark as not absent since they checked in
+      });
     } else {
+      // Update existing workDay
       workDay.checkIn = checkInTime;
+      workDay.absent = false; // Mark as not absent since they checked in
     }
 
+    // Reset previous status flags to ensure clean state
+    worker.isGone = false;
     worker.isPresent = true;
+    worker.isLate = false; // Reset late status before checking
 
-    const lateMinutes = calculateMinutes(worker.checkInTime, checkInTime);
+    // Fix: Calculate late minutes correctly using your existing function
+    if (worker.checkInTime) {
+      // If worker has a fixed check-in time
+      // Your calculateMinutes function already returns positive values only
+      const lateMinutes = calculateMinutes(worker.checkInTime, checkInTime);
 
-    if (lateMinutes > 0) {
-      const hasLeave = worker.leaves.some((leave) => {
-        const leaveStart = new Date(leave.start).setHours(0, 0, 0, 0);
-        const leaveEnd = new Date(leave.end).setHours(0, 0, 0, 0);
-        return today >= leaveStart && today <= leaveEnd;
-      });
+      if (lateMinutes > 0) {
+        // Check if worker has leave for today
+        const hasLeave = await Leave.findOne({
+          worker: worker._id,
+          start: { $lte: today },
+          end: { $gte: today },
+        });
 
-      if (!hasLeave) {
-        worker.isLate = true;
-        workDay.lateMinutes = lateMinutes;
+        if (!hasLeave) {
+          worker.isLate = true;
+          workDay.lateMinutes = lateMinutes;
 
-        if (worker.autoFine) {
-          const fineAmount = lateMinutes * worker.finePerMinute;
-          worker.fines.push({
-            amount: fineAmount,
-            date: new Date(),
-            reason: "Kech kelish",
-          });
-          worker.penalty += fineAmount;
+          if (worker.autoFine) {
+            const fineAmount = lateMinutes * worker.finePerMinute;
+
+            // Create a new fine
+            const newFine = new Fine({
+              worker: worker._id,
+              amount: fineAmount,
+              date: new Date(),
+              reason: "Kech kelish",
+            });
+
+            await newFine.save();
+            worker.penalty += fineAmount;
+          }
         }
       }
     }
 
+    await workDay.save();
     await worker.save();
 
     return response(res, 200, null, {
       message: "Ishchi kelganligi qayd etildi!",
       worker,
+      workDay,
     });
   } catch (error) {
     return response(res, 500, error.message);
@@ -464,11 +541,16 @@ const checkOut = async (req, res) => {
     if (!worker) return;
 
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Bugungi kunni faqat sanasi bilan olish
+    today.setHours(0, 0, 0, 0); // Set to start of day for comparison
 
-    let workDay = worker.workDays.find(
-      (day) => new Date(day.date).setHours(0, 0, 0, 0) === today.getTime()
-    );
+    // Find today's workDay
+    const workDay = await WorkDay.findOne({
+      worker: worker._id,
+      date: {
+        $gte: today,
+        $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+      },
+    });
 
     if (!workDay) {
       return response(
@@ -479,8 +561,6 @@ const checkOut = async (req, res) => {
     }
 
     // Check if worker has already checked out today
-    console.log(workDay.checkOut);
-    console.log(workDay);
     if (workDay.checkOut) {
       return response(res, 400, "Ishchi allaqachon ketgan!");
     }
@@ -498,36 +578,47 @@ const checkOut = async (req, res) => {
     // Worker's designated checkout time
     const fixedCheckOut = worker.checkOutTime || "18:00"; // Default to 18:00 if not set
 
-    const earlyMinutes = calculateMinutes(checkOutTime, fixedCheckOut);
+    // For early minutes, we need to swap the parameters since your function
+    // only returns positive values
+    if (worker.checkOutTime) {
+      const leftEarlyMinutes = calculateMinutes(checkOutTime, fixedCheckOut);
 
-    // If worker left early
-    if (earlyMinutes > 0) {
-      const hasLeave = worker.leaves.some((leave) => {
-        const leaveStart = new Date(leave.start).setHours(0, 0, 0, 0);
-        const leaveEnd = new Date(leave.end).setHours(0, 0, 0, 0);
-        return today >= leaveStart && today <= leaveEnd;
-      });
+      if (leftEarlyMinutes > 0) {
+        // Check if worker has leave for today
+        const hasLeave = await Leave.findOne({
+          worker: worker._id,
+          start: { $lte: today },
+          end: { $gte: today },
+        });
 
-      if (!hasLeave) {
-        workDay.leftEarlyMinutes = earlyMinutes;
+        if (!hasLeave) {
+          workDay.leftEarlyMinutes = leftEarlyMinutes;
 
-        if (worker.autoFine) {
-          const fineAmount = earlyMinutes * worker.finePerMinute;
-          worker.fines.push({
-            amount: fineAmount,
-            date: new Date(),
-            reason: "Vaqtli ketish",
-          });
-          worker.penalty += fineAmount;
+          if (worker.autoFine) {
+            const fineAmount = leftEarlyMinutes * worker.finePerMinute;
+
+            // Create a new fine
+            const newFine = new Fine({
+              worker: worker._id,
+              amount: fineAmount,
+              date: new Date(),
+              reason: "Vaqtli ketish",
+            });
+
+            await newFine.save();
+            worker.penalty += fineAmount;
+          }
         }
       }
     }
 
+    await workDay.save();
     await worker.save();
 
     return response(res, 200, null, {
       message: "Ishchi ketganligi qayd etildi!",
       worker,
+      workDay,
     });
   } catch (error) {
     return response(res, 500, error.message);
@@ -560,15 +651,172 @@ const outside = async (req, res) => {
     if (isOutside) {
       worker.isOutside = true;
       worker.penalty += worker.finePerMinute;
+
+      // Create a new fine
+      const newFine = new Fine({
+        worker: worker._id,
+        amount: worker.finePerMinute,
+        date: new Date(),
+        reason: "Tashqarida",
+      });
+
+      await newFine.save();
       await worker.save();
     } else {
       worker.isOutside = false;
+      await worker.save();
     }
 
     return response(res, 200, null, {
       message: "Ishchi joylashuvi tekshirildi!",
       isOutside,
     });
+  } catch (error) {
+    return response(res, 500, error.message);
+  }
+};
+
+// 📌 Reset daily worker statuses
+const resetDailyWorkerStatus = async () => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Check if today is a holiday
+    const isHoliday = await Holiday.findOne({
+      date: { $eq: today.toISOString().split("T")[0] },
+    });
+
+    // Get all workers
+    const workers = await Worker.find();
+
+    for (const worker of workers) {
+      // Reset daily status flags
+      worker.isLate = false;
+      worker.isPresent = false;
+      worker.isOutside = false;
+      worker.isGone = false;
+
+      // Check if worker has leave for today
+      const hasLeave = await Leave.findOne({
+        worker: worker._id,
+        start: { $lte: today },
+        end: { $gte: today },
+      });
+
+      // If not a holiday and worker doesn't have leave, mark as absent by default
+      // This will be updated when they check in
+      if (!isHoliday && !hasLeave) {
+        // Check if a workday already exists for today
+        const existingWorkDay = await WorkDay.findOne({
+          worker: worker._id,
+          date: {
+            $gte: today,
+            $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+          },
+        });
+
+        if (!existingWorkDay) {
+          // Create a new workDay with absent=true
+          const newWorkDay = new WorkDay({
+            worker: worker._id,
+            date: today,
+            checkIn: null,
+            checkOut: null,
+            lateMinutes: 0,
+            leftEarlyMinutes: 0,
+            absent: true,
+          });
+
+          await newWorkDay.save();
+        }
+      }
+
+      await worker.save();
+    }
+
+    console.log("Daily worker statuses reset successfully");
+    return {
+      success: true,
+      message: "Daily worker statuses reset successfully",
+    };
+  } catch (error) {
+    console.error("Error resetting daily worker statuses:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// 📌 Reset monthly worker statuses
+const resetMonthlyWorkerStatus = async () => {
+  try {
+    const workers = await Worker.find();
+
+    for (const worker of workers) {
+      // Reset fines to 0
+      worker.penalty = 0;
+
+      // Delete all fines for this worker
+      await Fine.deleteMany({ worker: worker._id });
+
+      // Clear expired leaves
+      const today = new Date();
+      await Leave.deleteMany({
+        worker: worker._id,
+        end: { $lt: today },
+      });
+
+      // Keep only the last 30 days of workDays
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      await WorkDay.deleteMany({
+        worker: worker._id,
+        date: { $lt: thirtyDaysAgo },
+      });
+
+      await worker.save();
+    }
+
+    console.log("Monthly worker statuses reset successfully");
+    return {
+      success: true,
+      message: "Monthly worker statuses reset successfully",
+    };
+  } catch (error) {
+    console.error("Error resetting monthly worker statuses:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// 📌 Reset daily worker statuses endpoint
+const resetDailyStatus = async (req, res) => {
+  try {
+    const result = await resetDailyWorkerStatus();
+
+    if (result.success) {
+      return response(res, 200, null, {
+        message: result.message,
+      });
+    } else {
+      return response(res, 500, result.error);
+    }
+  } catch (error) {
+    return response(res, 500, error.message);
+  }
+};
+
+// 📌 Reset monthly worker statuses endpoint
+const resetMonthlyStatus = async (req, res) => {
+  try {
+    const result = await resetMonthlyWorkerStatus();
+
+    if (result.success) {
+      return response(res, 200, null, {
+        message: result.message,
+      });
+    } else {
+      return response(res, 500, result.error);
+    }
   } catch (error) {
     return response(res, 500, error.message);
   }
@@ -587,4 +835,6 @@ module.exports = {
   checkIn,
   checkOut,
   outside,
+  resetDailyStatus,
+  resetMonthlyStatus,
 };

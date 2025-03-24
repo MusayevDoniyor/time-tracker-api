@@ -8,6 +8,7 @@ const branchesRoute = require("./routes/branches.routes");
 const renderMainPageRoutes = require("./routes/main.route");
 
 const connectDB = require("./config/db");
+const { initCronJobs } = require("./cron/worker-status-cron");
 
 const app = express();
 app.use(express.json());
@@ -23,6 +24,8 @@ app.use("/api/branches", branchesRoute);
 const PORT = process.env.PORT || 5000;
 
 connectDB();
+
+initCronJobs();
 
 app.listen(PORT, () =>
   console.log(`🚀 Server is running on http://localhost:${PORT}`)

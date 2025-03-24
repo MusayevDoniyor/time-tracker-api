@@ -52,38 +52,6 @@ const workerSchema = new mongoose.Schema(
     isPresent: { type: Boolean, default: false },
     isOutside: { type: Boolean, default: false },
     isGone: { type: Boolean, default: false },
-
-    workDays: [
-      {
-        date: { type: Date, default: Date.now },
-        checkIn: { type: String, default: null },
-        checkOut: { type: String, default: null },
-        lateMinutes: { type: Number, default: 0, min: 0 },
-        leftEarlyMinutes: { type: Number, default: 0, min: 0 },
-        absent: { type: Boolean, default: false },
-      },
-    ],
-
-    fines: [
-      {
-        date: { type: Date, required: true, default: Date.now() },
-        amount: { type: Number, required: true, min: 1 },
-        reason: { type: String, default: "" },
-      },
-    ],
-
-    leaves: [
-      {
-        start: { type: Date, required: true },
-        end: { type: Date, required: true },
-        reason: { type: String, default: "" },
-        type: {
-          type: String,
-          enum: ["ta'til", "kasallik", "shaxsiy sabab"],
-          required: true,
-        },
-      },
-    ],
   },
   {
     timestamps: true,

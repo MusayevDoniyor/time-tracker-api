@@ -13,6 +13,8 @@ const {
   checkIn,
   checkOut,
   outside,
+  resetDailyStatus,
+  resetMonthlyStatus,
 } = require("../controllers/worker.controller");
 
 const router = express.Router();
@@ -54,5 +56,12 @@ router.post("/:id/check-out", checkOut);
 
 // 📌 Ishchi tashqarida
 router.post("/:id/outside", outside);
+
+// * WORKER STATUS RESETS
+// 📌 Kunlik statuslarni yangilash
+router.post("/reset-daily", resetDailyStatus);
+
+// 📌 Oylik statuslarni yangilash
+router.post("/reset-monthly", resetMonthlyStatus);
 
 module.exports = router;

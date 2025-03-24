@@ -1,3 +1,5 @@
+// Fix the calculateMinutes function to handle both late and early cases correctly
+
 exports.calculateMinutes = (fixedTime, actualTime = Date.now) => {
   console.log(fixedTime, actualTime);
   const [fixedHour, fixedMin] = fixedTime.split(":").map(Number);
@@ -6,8 +8,11 @@ exports.calculateMinutes = (fixedTime, actualTime = Date.now) => {
   const fixedMinutes = fixedHour * 60 + fixedMin;
   const actualMinutes = actualHour * 60 + actualMin;
 
-  console.log(actualMinutes - fixedMinutes, 0);
-  return Math.max(actualMinutes - fixedMinutes, 0); // Faqat kech qolgan vaqtni olamiz
+  // For late minutes (check-in): actualTime > fixedTime means late
+  // For early minutes (check-out): actualTime < fixedTime means early
+  const minutesDifference = actualMinutes - fixedMinutes;
+  console.log(minutesDifference, 0);
+  return Math.max(minutesDifference, 0); // Only return positive values
 };
 
 exports.getDistance = (loc1, loc2) => {
