@@ -683,56 +683,67 @@ const resetDailyWorkerStatus = async () => {
     today.setHours(0, 0, 0, 0);
 
     // Check if today is a holiday
-    const isHoliday = await Holiday.findOne({
-      date: { $eq: today.toISOString().split("T")[0] },
+    const isHoliday = await Holiday.exists({
+      date: today.toISOString().split("T")[0],
     });
 
     // Get all workers
-    const workers = await Worker.find();
+    const workers = await Worker.find({}, "_id");
 
-    for (const worker of workers) {
-      // Reset daily status flags
-      worker.isLate = false;
-      worker.isPresent = false;
-      worker.isOutside = false;
-      worker.isGone = false;
-
-      // Check if worker has leave for today
-      const hasLeave = await Leave.findOne({
-        worker: worker._id,
-        start: { $lte: today },
-        end: { $gte: today },
-      });
-
-      // If not a holiday and worker doesn't have leave, mark as absent by default
-      // This will be updated when they check in
-      if (!isHoliday && !hasLeave) {
-        // Check if a workday already exists for today
-        const existingWorkDay = await WorkDay.findOne({
-          worker: worker._id,
-          date: {
-            $gte: today,
-            $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
-          },
-        });
-
-        if (!existingWorkDay) {
-          // Create a new workDay with absent=true
-          const newWorkDay = new WorkDay({
-            worker: worker._id,
-            date: today,
-            checkIn: null,
-            checkOut: null,
-            lateMinutes: 0,
-            leftEarlyMinutes: 0,
-            absent: true,
-          });
-
-          await newWorkDay.save();
-        }
+    await Worker.updateMany(
+      {},
+      {
+        $set: {
+          isLate: false,
+          isGone: false,
+          isOutside: false,
+          isPresent: false,
+        },
       }
+    );
 
-      await worker.save();
+    const workLeaves = await Leave.find({
+      worker: { $in: workers.map((w) => w._id) },
+      start: { $lte: today },
+      end: { $gte: today },
+    }).select("worker");
+
+    // Ta'tilda bo‘lmagan ishchilar ro‘yxatini hosil qilamiz
+    const workersWithoutLeave = workers
+      .map((w) => w._id.toString())
+      .filter(
+        (id) => !workerLeaves.some((leave) => leave.worker.toString() === id)
+      );
+
+    // Bugun uchun mavjud `WorkDay` larni topamiz
+    const existingWorkDays = workersWithoutLeave
+      .find({
+        worker: { $in: workersWithoutLeave },
+        date: {
+          $gte: today,
+          $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000),
+        },
+      })
+      .select("worker");
+
+    // Bugun `WorkDay` mavjud bo‘lmagan ishchilar
+    const newWorkDays = workersWithoutLeave.filter(
+      (id) =>
+        !existingWorkDays.some((workDay) => workDay.worker.toString() === id)
+    );
+
+    // Yangi `WorkDay` larni yaratish
+    if (newWorkDays.length > 0) {
+      const workDaysToInsert = newWorkDays.map((workerId) => ({
+        worker: workerId,
+        date: today,
+        checkIn: null,
+        checkOut: null,
+        lateMinutes: 0,
+        leftEarlyMinutes: 0,
+        absent: true,
+      }));
+      await WorkDay.insertMany(workDaysToInsert);
     }
 
     console.log("Daily worker statuses reset successfully");
@@ -749,33 +760,24 @@ const resetDailyWorkerStatus = async () => {
 // 📌 Reset monthly worker statuses
 const resetMonthlyWorkerStatus = async () => {
   try {
-    const workers = await Worker.find();
+    const today = new Date();
 
-    for (const worker of workers) {
-      // Reset fines to 0
-      worker.penalty = 0;
+    // Keep only the last 30 days of workDays
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    today.setHours(23, 59, 59, 999); // Faqat bugungi kunni olish uchun vaqtni o'chirish
 
-      // Delete all fines for this worker
-      await Fine.deleteMany({ worker: worker._id });
+    // 1. Barcha ishcilar jarimalarini o'chirish
+    await Worker.updateMany({}, { $set: { penalty: 0 } });
 
-      // Clear expired leaves
-      const today = new Date();
-      await Leave.deleteMany({
-        worker: worker._id,
-        end: { $lt: today },
-      });
+    // 2. Barcha jarimalarni o'chirish
+    await Fine.deleteMany();
 
-      // Keep only the last 30 days of workDays
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    // 3. Muddati o'tgan ruhsatlarni o'chirish
+    await Leave.deleteMany({ end: { $lt: today } });
 
-      await WorkDay.deleteMany({
-        worker: worker._id,
-        date: { $lt: thirtyDaysAgo },
-      });
-
-      await worker.save();
-    }
+    // 4. 30 kundan oldingi ish kunlarini o'chirish
+    await WorkDay.deleteMany({ date: { $lt: thirtyDaysAgo } });
 
     console.log("Monthly worker statuses reset successfully");
     return {
