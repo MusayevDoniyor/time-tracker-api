@@ -2,7 +2,7 @@ const cron = require("node-cron");
 const {
   resetDailyWorkerStatus,
   resetMonthlyWorkerStatus,
-} = require("../utils/workerStatus");
+} = require("../controllers/worker.controller");
 
 const initCronJobs = () => {
   cron.schedule("0 0 * * *", async () => {
